@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Escape: Pro Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; touch-action: none; }
+        canvas { display: block; }
+        #ui {
+            position: absolute; top: 15px; left: 15px;
+            color: #00d4ff; font-size: 22px; pointer-events: none;
+            text-shadow: 0 0 10px #00d4ff; line-height: 1.5;
+        }
+        #level-up {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: white; font-size: 50px; display: none; text-shadow: 0 0 20px #fff;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        LEVEL: <span id="lvl">1</span><br>
+        SCORE: <span id="score">0</span>
+    </div>
+    <div id="level-up">LEVEL UP!</div>
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreElement = document.getElementById('score');
+    const lvlElement = document.getElementById('lvl');
+    const lvlUpText = document.getElementById('level-up');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let score = 0;
+    let level = 1;
+    let gameActive = true;
+    let mouse = { x: canvas.width/2, y: canvas.height/2 };
+    let enemies = [];
+    let powerUp = null;
+
+    // --- PRO SOUND ENGINE ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    function playSound(freq, type, duration, vol = 0.1) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // Background Music Loop (Simple Techno Beat)
+    setInterval(() => {
+        if(gameActive) {
+            playSound(60, 'sine', 0.2, 0.05); // Bass kick
+            setTimeout(() => playSound(120, 'square', 0.1, 0.02), 250); // Snare-ish
+        }
+    }, 500);
+
+    // Support for both Mouse and Touch
+    function updatePos(e) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        mouse.x = clientX;
+        mouse.y = clientY;
+    }
+    window.addEventListener('mousemove', updatePos);
+    window.addEventListener('touchmove', (e) => { e.preventDefault(); updatePos(e); }, {passive: false});
+
+    class Enemy {
+        constructor() {
+            this.radius = 8 + Math.random() * 12;
+            const side = Math.floor(Math.random() * 4);
+            if(side === 0) { this.x = 0; this.y = Math.random()*canvas.height; }
+            else if(side === 1) { this.x = canvas.width; this.y = Math.random()*canvas.height; }
+            else if(side === 2) { this.x = Math.random()*canvas.width; this.y = 0; }
+            else { this.x = Math.random()*canvas.width; this.y = canvas.height; }
+            
+            let speed = 4 + (level * 1.5);
+            this.dx = (Math.random() - 0.5) * speed;
+            this.dy = (Math.random() - 0.5) * speed;
+        }
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff3333';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ff3333';
+            ctx.fill();
+        }
+        update() {
+            this.x += this.dx; this.y += this.dy;
+            if (this.x < -50 || this.x > canvas.width + 50 || this.y < -50 || this.y > canvas.height + 50) {
+                enemies.splice(enemies.indexOf(this), 1);
+            }
+            if (Math.hypot(this.x - mouse.x, this.y - mouse.y) < this.radius + 12) {
+                gameActive = false;
+                playSound(50, 'sawtooth', 1, 0.2);
+                alert("GAME OVER! LEVEL: " + level + " | SCORE: " + Math.floor(score));
+                location.reload();
+            }
+        }
+    }
+
+    class PowerUp {
+        constructor() {
+            this.x = Math.random() * (canvas.width - 60) + 30;
+            this.y = Math.random() * (canvas.height - 60) + 30;
+        }
+        draw() {
+            ctx.fillStyle = '#ffdf00';
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#ffdf00';
+            ctx.fillRect(this.x-10, this.y-10, 20, 20);
+        }
+    }
+
+    setInterval(() => { if(gameActive && enemies.length < 10 + (level*2)) enemies.push(new Enemy()); }, 600);
+    setInterval(() => { if(gameActive && !powerUp) powerUp = new PowerUp(); }, 8000);
+
+    function animate() {
+        if (!gameActive) return;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Player Trail
+        ctx.beginPath();
+        ctx.arc(mouse.x, mouse.y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = '#00d4ff';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#00d4ff';
+        ctx.fill();
+
+        if (powerUp) {
+            powerUp.draw();
+            if (Math.hypot(powerUp.x - mouse.x, powerUp.y - mouse.y) < 30) {
+                playSound(1000, 'sine', 0.3);
+                enemies = []; powerUp = null; score += 100;
+            }
+        }
+
+        enemies.forEach(e => { e.update(); e.draw(); });
+
+        score += 0.2;
+        scoreElement.innerText = Math.floor(score);
+
+        // Level Up Logic
+        if (Math.floor(score) > level * 500) {
+            level++;
+            lvlElement.innerText = level;
+            playSound(600, 'sine', 0.5);
+            lvlUpText.style.display = 'block';
+            setTimeout(() => lvlUpText.style.display = 'none', 1000);
+        }
+
+        requestAnimationFrame(animate);
+    }
+    animate();
+</script>
+</body>
+</html>
