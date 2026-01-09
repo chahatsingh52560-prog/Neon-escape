@@ -1,63 +1,139 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Striker</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Striker: Extreme Edition</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; touch-action: none; }
-        #ui { position: absolute; top: 15px; left: 15px; color: #00d4ff; font-size: 20px; pointer-events: none; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; touch-action: none; }
+        canvas { display: block; }
+        #ui {
+            position: absolute; top: 15px; left: 15px;
+            color: #00d4ff; font-size: 18px; pointer-events: none;
+            text-shadow: 0 0 10px #00d4ff; z-index: 5; display: none;
+        }
+        #menu {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: rgba(0, 0, 0, 0.9); z-index: 10; color: #fff; text-align: center;
+        }
+        h1 { font-size: 50px; color: #00d4ff; text-shadow: 0 0 20px #00d4ff; margin-bottom: 10px; }
+        button {
+            padding: 15px 40px; font-size: 24px; background: transparent;
+            border: 2px solid #00d4ff; color: #00d4ff; cursor: pointer;
+            border-radius: 50px; transition: 0.3s; box-shadow: 0 0 15px #00d4ff;
+        }
+        button:hover { background: #00d4ff; color: #000; box-shadow: 0 0 30px #00d4ff; }
     </style>
 </head>
 <body>
-    <div id="ui">Score: <span id="score">0</span> | Level: <span id="lvl">1</span></div>
+    <div id="menu">
+        <h1>NEON STRIKER</h1>
+        <p style="color: #aaa; margin-bottom: 20px;">Score 500+ for TRIPLE SHOT</p>
+        <button onclick="startGame()">START MISSION</button>
+    </div>
+
+    <div id="ui">
+        SCORE: <span id="score">0</span> | BEST: <span id="best">0</span><br>
+        LIVES: <span id="lives">❤️❤️❤️</span> | LEVEL: <span id="lvl">1</span>
+    </div>
     <canvas id="gameCanvas"></canvas>
+
 <script>
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-    let score = 0; let level = 1; let gameActive = true;
+
+    let score = 0, level = 1, lives = 3, gameActive = false;
+    let highScore = localStorage.getItem('neonHighScore') || 0;
+    document.getElementById('best').innerText = highScore;
+
     let mouse = { x: canvas.width/2, y: canvas.height/2 };
-    let enemies = []; let bullets = [];
+    let enemies = [], bullets = [], stars = [];
+
+    // --- SOUND ENGINE ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(freq, type, duration, vol) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // Stars Background
+    for(let i=0; i<80; i++) {
+        stars.push({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, size: Math.random()*2, speed: Math.random()*3 + 1 });
+    }
+
+    function startGame() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('ui').style.display = 'block';
+        gameActive = true;
+        animate();
+    }
 
     window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
-    window.addEventListener('touchmove', e => { mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; });
-    window.addEventListener('mousedown', () => { if(gameActive) bullets.push({ x: mouse.x, y: mouse.y, speed: 10 }); });
+    window.addEventListener('touchmove', e => { e.preventDefault(); mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; }, {passive: false});
+    window.addEventListener('mousedown', shoot);
+    window.addEventListener('touchstart', shoot);
+
+    function shoot() {
+        if(!gameActive) return;
+        playSound(600, 'triangle', 0.1, 0.1); // Laser Sound
+        if(score >= 500) {
+            bullets.push({x: mouse.x, y: mouse.y, vx: 0}, {x: mouse.x, y: mouse.y, vx: -2}, {x: mouse.x, y: mouse.y, vx: 2});
+        } else {
+            bullets.push({x: mouse.x, y: mouse.y, vx: 0});
+        }
+    }
 
     class Enemy {
         constructor() {
             this.x = Math.random() * canvas.width; this.y = -50;
-            this.radius = 15; this.speed = 2 + (level * 0.5);
+            this.radius = 15 + Math.random() * 10;
+            this.speed = 2 + (level * 0.4);
         }
-        update() { this.y += this.speed; }
+        update() {
+            this.y += this.speed;
+            if (Math.hypot(this.x - mouse.x, this.y - mouse.y) < this.radius + 15) {
+                lives--;
+                playSound(100, 'sawtooth', 0.3, 0.2); // Hit Sound
+                enemies = [];
+                document.getElementById('lives').innerText = "❤️".repeat(lives);
+                if(lives <= 0) gameOver();
+            }
+        }
         draw() {
             ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
-            ctx.fillStyle = '#ff4d4d'; ctx.fill();
+            ctx.fillStyle = '#ff4d4d'; ctx.shadowBlur = 15; ctx.shadowColor = '#ff4d4d'; ctx.fill();
         }
+    }
+
+    function gameOver() {
+        gameActive = false;
+        playSound(50, 'square', 1, 0.5); // Explosion
+        if(score > highScore) localStorage.setItem('neonHighScore', score);
+        alert("MISSION FAILED! Score: " + score);
+        location.reload();
     }
 
     function animate() {
-        if(!gameActive) return;
-        ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(0,0,canvas.width, canvas.height);
-        ctx.fillStyle = '#00d4ff'; ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 15, 0, Math.PI*2); ctx.fill();
+        if (!gameActive) return;
+        ctx.fillStyle = 'black'; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        bullets.forEach((b, i) => {
-            b.y -= b.speed; ctx.fillStyle = '#fff'; ctx.fillRect(b.x-2, b.y, 4, 10);
-            if(b.y < 0) bullets.splice(i, 1);
+        stars.forEach(s => {
+            s.y += s.speed; if(s.y > canvas.height) s.y = 0;
+            ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2); ctx.fill();
         });
 
-        enemies.forEach((e, ei) => {
-            e.update(); e.draw();
-            if(Math.hypot(e.x - mouse.x, e.y - mouse.y) < 30) { gameActive = false; alert("Game Over!"); location.reload(); }
-            bullets.forEach((b, bi) => {
-                if(Math.hypot(e.x - b.x, e.y - b.y) < 20) { enemies.splice(ei, 1); bullets.splice(bi, 1); score += 10; }
-            });
-        });
+        ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 15, 0, Math.PI*2);
+        ctx.fillStyle = '#00d4ff'; ctx.shadowBlur = 20; ctx.shadowColor = '#00d4ff'; ctx.fill();
 
-        if(Math.random() < 0.05) enemies.push(new Enemy());
-        document.getElementById('score').innerText = score;
-        requestAnimationFrame(animate);
-    }
-    animate();
-</script>
-</body>
-</html>
+        bullets.forEach((b, index) => {
+            b.y -= 12; b.x += (b.vx || 0);
+            ctx.fillStyle = '#fff'; ctx.fillRect(b.x-2,
